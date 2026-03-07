@@ -19,7 +19,7 @@ logging.basicConfig(
 )
 
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
 
 
 DATABASE_URL = "https://zkxdazowhbkgvbzmtfbm.supabase.co"
