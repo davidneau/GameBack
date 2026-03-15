@@ -17,7 +17,11 @@ logging.basicConfig(
 )
 
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent')
+
+# Activer CORS pour toutes les routes et pour toutes les origines
+CORS(app, resources={r"/*": {"origins": "*"}})
+
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode=None)
 
 
 DATABASE_URL = "https://zkxdazowhbkgvbzmtfbm.supabase.co"
@@ -31,8 +35,7 @@ app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(days=15)
 
 jwt = JWTManager(app)
 
-# Activer CORS pour toutes les routes et pour toutes les origines
-CORS(app, resources={r"/*": {"origins": "*"}})
+categories = ["prenomsF", "prenomsM", "metiers", "legumesfruits", "paysvilles", "celebrities"]
 
 @app.post('/login')
 def login():
@@ -175,9 +178,16 @@ def player_ready(data):
 
     emit("players_update", list_players(room), room=room)
 
-    if all(p["ready"] == "Good" for p in games[room]["players"].values()) and len(games[room]["players"]) == 2 and games[room]["round"]<26:
-        start_round(room)
+    if all(p["ready"] == "Good" for p in games[room]["players"].values()) and len(games[room]["players"]) == 2 and games[room]["round"]<26:        start_round(room)
 
+@socketio.on("scoreFinal")
+def score_final(data):
+    room = data["room"]
+    list_sid = [sid for sid in games[room]["players"]]
+    result = []
+    for sid in list_sid:
+        result.append({games[room]["players"][sid]["name"]: [games[room]["players"][sid]["score"], "Good"]})
+    emit("end_game", {"score": result}, room=room)
 
 @socketio.on("stop_game")
 def stop_game(data):
@@ -191,9 +201,33 @@ def stop_game(data):
     for play in games[room]["players"]:
         games[room]["players"][play]["ready"] = "Bad"
 
+    list_sid = [sid for sid in games[room]["players"]]
+    players = games[room]["players"]
+
+    result = []
+    for cat in categories:
+        result_cat = {}
+        answers = []
+        for sid in list_sid:
+            answers.append(players[sid]["ans"][cat][0])
+        print("list answers : ", answers)
+        for sid in list_sid:
+            classAns = ""
+            if answers.count(players[sid]["ans"][cat][0]) >= 2 and players[sid]["ans"][cat][0] != "No Answer":
+                print(f"{sid} a eu une réponse similaire")
+                classAns = "Draw"
+                players[sid]["score"] += 1
+            else:
+                classAns = players[sid]["ans"][cat][1]
+                if players[sid]["ans"][cat][1] == "Good":
+                    players[sid]["score"] += 2
+            result_cat[players[sid]["name"]] = [players[sid]["ans"][cat][0], classAns]
+        result.append(result_cat)
+        
+
     emit("players_update", list_players(room), room=room)
     emit("game_stopped", {"message": "STOP !"}, room=room, include_self=False)
-    emit("end_round", {"ans": games[room]["players"]}, room=room)
+    emit("end_round", {"ans": result}, room=room)
 
 @socketio.on("disconnect")
 def disconnect():
