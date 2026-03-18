@@ -178,7 +178,7 @@ def player_ready(data):
 
     emit("players_update", list_players(room), room=room)
 
-    if all(p["ready"] == "Good" for p in games[room]["players"].values()) and len(games[room]["players"]) == 2 and games[room]["round"]<26:        start_round(room)
+    if all(p["ready"] == "Good" for p in games[room]["players"].values()) and len(games[room]["players"]) == 4 and games[room]["round"]<26:        start_round(room)
 
 @socketio.on("scoreFinal")
 def score_final(data):
