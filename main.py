@@ -59,7 +59,7 @@ def login():
         logging.info(password.encode("utf-8"))
         if bcrypt.checkpw(password.encode("utf-8"), users[0]["password"].encode("utf-8")) :
             token = create_access_token(identity=identifiant)
-            return jsonify(access_token=token), 200
+            return jsonify(access_token=token, time_token=users[0]["time_token"]), 200
     return jsonify(msg="Invalid credentials"), 401
 
 @app.get('/profile')
