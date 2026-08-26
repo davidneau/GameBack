@@ -86,6 +86,8 @@ def signIn():
     return "OK", 200
 
 from tiktok import get_stream_url, transcribe_live, isLivingDef
+import tiktok
+print(tiktok.__file__)
 @app.route('/getTiktokLive/<string:user_id>')
 def getTiktokLive(user_id):
     print(user_id)
