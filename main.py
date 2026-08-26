@@ -21,7 +21,7 @@ app = Flask(__name__)
 # Activer CORS pour toutes les routes et pour toutes les origines
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode=None)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 
 DATABASE_URL = "https://zkxdazowhbkgvbzmtfbm.supabase.co"
@@ -85,6 +85,20 @@ def signIn():
     )
     return "OK", 200
 
+from tiktok import get_stream_url, transcribe_live, isLivingDef
+@app.route('/getTiktokLive/<string:user_id>')
+def getTiktokLive(user_id):
+    print(user_id)
+    url = get_stream_url(user_id)
+    #transcribe_live(url, output_file="transcription.txt")
+    return url, 200
+
+@app.route('/isLiving/<string:user_id>')
+async def isLiving(user_id):
+    print(user_id)
+    result = await isLivingDef(user_id)
+    print(result)
+    return str(result), 200
 
 @socketio.on("check_on")
 def get_data(data):
