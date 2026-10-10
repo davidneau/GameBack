@@ -3,8 +3,31 @@ import os
 import time
 from faster_whisper import WhisperModel
 from TikTokLive import TikTokLiveClient
-import asyncio
+import json
+import os
+import subprocess
 
+# Ordre de préférence : les qualités basses sont plus souvent en H.264
+PREFERRED = ["sd", "hd", "md", "ld", "uhd", "origin"]
+
+def get_stream_url(user_id, quality="h264_hd"):
+    tiktok_url = f"https://www.tiktok.com/@{user_id}/live"
+    print(tiktok_url)
+    print(quality)
+
+    result = subprocess.run(
+        ["streamlink", "--http-cookie", f"sessionid=708c4263f0ad25e268778b5bae825828",
+         "--stream-url", tiktok_url, quality],
+        capture_output=True, text=True, timeout=30,
+    )
+
+    if result.returncode != 0:
+        raise Exception(f"Erreur Streamlink: {result.stderr.strip()}")
+
+    stream_url = result.stdout.strip()
+    if not stream_url:
+        raise Exception("Aucun flux trouvé")
+    return stream_url
 
 async def isLivingDef(unique_id):
     client = TikTokLiveClient(unique_id="@" + unique_id)
@@ -24,61 +47,49 @@ async def isLivingDef(unique_id):
 
     return False
 
-def get_stream_url(user_id, quality="best"):
-    tiktok_url = f"https://www.tiktok.com/@{user_id}/live"
-    
-    result = subprocess.run(
-        [
-            "streamlink",
-            "--http-cookie", "sessionid=5bd1f4f54127f13c9c5c783aa4d3ec77",
-            "--stream-url",
-            tiktok_url,
-            quality,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=30,
+
+import os
+import subprocess
+import numpy as np
+
+SAMPLE_RATE = 16000
+CHUNK_SECONDS = 15
+BYTES_PER_CHUNK = SAMPLE_RATE * 2 * CHUNK_SECONDS  # 16 bits = 2 octets par échantillon
+
+
+def transcribe_live(user_id, output_file):
+
+    print("aaaaa", user_id)
+    model = WhisperModel("large-v3-turbo", device="cpu", compute_type="int8")
+    audio_url = get_stream_url(user_id, quality="h264_ao")
+
+    ffmpeg = subprocess.Popen(
+        ["ffmpeg", "-loglevel", "quiet", "-i", audio_url,
+         "-vn", "-ac", "1", "-ar", str(SAMPLE_RATE),
+         "-f", "s16le", "pipe:1"],
+        stdout=subprocess.PIPE,
     )
 
-    if result.returncode != 0:
-        raise Exception(f"Erreur Streamlink : {result.stderr.strip()}")
-
-    stream_url = result.stdout.strip()
-    if not stream_url:
-        raise Exception("Aucun flux trouvé pour cette URL")
-
-    return stream_url
-
-def transcribe_live(stream_url, output_file="transcription.txt", chunk_seconds=15):
-    model = WhisperModel("base", device="cpu", compute_type="int8")  # "small"/"medium" = plus précis mais plus lent
-
-    with open(output_file, "a", encoding="utf-8") as f:
+    try:
         while True:
-            chunk_path = "chunk_temp.wav"
-
-            # Capture chunk_seconds d'audio depuis le flux live
-            cmd = [
-                "ffmpeg", "-y",
-                "-i", stream_url,
-                "-t", str(chunk_seconds),
-                "-vn",                    # pas de vidéo
-                "-ar", "16000",           # 16kHz requis par Whisper
-                "-ac", "1",               # mono
-                "-loglevel", "error",
-                chunk_path,
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=chunk_seconds + 20)
-
-            if result.returncode != 0 or not os.path.exists(chunk_path):
-                print("Erreur ffmpeg, le live est peut-être terminé :", result.stderr)
+            raw = ffmpeg.stdout.read(BYTES_PER_CHUNK)
+            if not raw:
+                print("Flux terminé")
                 break
 
-            # Transcription du segment
-            segments, info = model.transcribe(chunk_path, language="fr")  # None = auto-détection langue
-            for segment in segments:
-                line = f"[{time.strftime('%H:%M:%S')}] {segment.text.strip()}"
-                print(line)
-                f.write(line + "\n")
-                f.flush()
+            # PCM 16 bits -> float32 entre -1 et 1
+            audio = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
 
-            os.remove(chunk_path)
+            segments, info = model.transcribe(
+                audio,
+                language="fr",
+                beam_size=5,
+                vad_filter=True,
+                condition_on_previous_text=False,
+            )
+            for seg in segments:
+                print(seg.text.strip())
+                with open(output_file, "a", encoding="utf8") as f:
+                    f.write(seg.text.strip()+"\n")
+    finally:
+        ffmpeg.kill()

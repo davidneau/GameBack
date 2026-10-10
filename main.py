@@ -4,12 +4,15 @@ from flask_jwt_extended import JWTManager, create_access_token, jwt_required, ge
 from supabase import create_client
 from flask_socketio import SocketIO, join_room, leave_room, emit
 import logging
-from supabase import create_client
 from games.petit_bac import belongTo
 from datetime import timedelta
 import bcrypt
 import uuid
 import random
+import threading
+from tiktok import get_stream_url, transcribe_live, isLivingDef
+from datetime import datetime
+import os
 
 logging.basicConfig(
     level=logging.INFO,
@@ -85,14 +88,17 @@ def signIn():
     )
     return "OK", 200
 
-from tiktok import get_stream_url, transcribe_live, isLivingDef
-import tiktok
-print(tiktok.__file__)
+
 @app.route('/getTiktokLive/<string:user_id>')
 def getTiktokLive(user_id):
-    print(user_id)
+    """ print(user_id)
+    maintenant = datetime.now().strftime("%d%m%Y_%H%M")
+    print(maintenant)
+    dossier = "./resume/" + user_id + "/" + maintenant
+    os.makedirs(dossier, exist_ok=True) """
     url = get_stream_url(user_id)
-    #transcribe_live(url, output_file="transcription.txt")
+    """ thread = threading.Thread(target=transcribe_live, args=(url, "./resume/" + user_id + "/" + maintenant + "/retranscription.txt"), daemon=True)
+    thread.start() """
     return url, 200
 
 @app.route('/isLiving/<string:user_id>')
@@ -276,6 +282,94 @@ def list_players(room):
         }
         for p in games[room]["players"].values()
     ]
+
+import time
+import requests
+
+BASE_URL = "https://www.dnd5eapi.co/api/2014"
+OUTPUT_FILE = "spells_fr.json"
+
+session = requests.Session()
+session.headers.update({
+    "Accept": "application/json",
+    "User-Agent": "JDR-Site/1.0"
+})
+
+
+def get_json(url, params=None):
+    response = session.get(url, params=params, timeout=15)
+    response.raise_for_status()
+    return response.json()
+
+
+def get_all_spells():
+    """
+    Récupère la liste de tous les sorts.
+    """
+    print("Récupération de la liste des sorts...")
+
+    data = get_json(f"{BASE_URL}/spells")
+
+    return data["results"]
+
+
+def get_spell_details(spell_index):
+    """
+    Récupère les détails d'un sort en français.
+    """
+    url = f"{BASE_URL}/spells/{spell_index}"
+
+    # lang=fr-FR demande la traduction française
+    return get_json(url, params={"lang": "fr-FR"})
+
+
+def fetchingSpells():
+    spells = get_all_spells()
+
+    print(f"{len(spells)} sorts trouvés.\n")
+
+    all_spells = []
+
+    for i, spell in enumerate(spells, start=1):
+        index = spell["index"]
+
+        print(f"[{i}/{len(spells)}] {spell['name']}...", end=" ")
+
+        try:
+            details = get_spell_details(index)
+            print(details)
+            desc = ""
+            deschl = ""
+            if len(details["desc"]) > 0:
+                desc = details["desc"][0]
+            if len(details["higher_level"]) > 0:
+                deschl = details["higher_level"][0]
+            response = (
+                    Supabase.table("Sort_JDR")
+                    .insert({
+                        "niveau": details["level"],
+                        "portee": details["range"],
+                        "composantes": details["components"],
+                        "duree": details["duration"],
+                        "description": desc,
+                        "description_haut_niveau": deschl,
+                        "classes": ",".join([classe["name"] for classe in details["classes"]])
+                    })
+                    .execute()
+                )
+            
+            all_spells.append(details)
+
+            print("OK")
+
+        except requests.RequestException as e:
+            print(f"ERREUR : {e}")
+
+        # Petite pause pour éviter d'envoyer trop de requêtes
+        time.sleep(0.05)
+
+    print(f"\nTerminé !")
+    print(f"{len(all_spells)} sorts sauvegardés dans {OUTPUT_FILE}")
 
 if __name__ == "__main__":
     socketio.run(app, host="0.0.0.0", port=5000)
